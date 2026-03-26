@@ -2,91 +2,60 @@
 import os
 import logging
 import asyncio
+import asyncpg
+from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler, 
-    filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+
+# Импортируем конфигурацию
+from config import (
+    TOKEN, ADMIN_ID, NOTIFY_CHAT, BOT_NAME, DATABASE_URL,
+    REFERRAL_BONUS, MIN_WITHDRAW, PAYMENT, PAYMENT_LINK, TARIFFS
 )
 
-# Загружаем переменные окружения
-load_dotenv()
-
-# Импортируем наши хендлеры и функции
+# Импортируем хендлеры
 from handlers import (
-    start, about_handler, feedback_handler, ref_menu, withdraw_handler,
-    show_catalog, select_tariff, handle_message, select_sex,
-    handle_promocode_input, skip_promo_handler, handle_media,
-    handle_admin_reply, admin_reply_feedback, admin_approve,
-    admin_confirm_withdraw, admin_panel_command, admin_panel,
-    admin_stats, admin_tariffs_menu, admin_promocodes_menu,
-    admin_promo_add_start, admin_broadcast_menu, admin_users_list,
-    admin_feedback_list, handle_broadcast_message, execute_broadcast,
-    handle_new_promo_input, handle_new_tariff_input, admin_tariff_toggle,
-    admin_tariff_edit_price, admin_tariff_edit_name, admin_tariff_add_start,
-    error_handler, button_handler, tariff_info_handler
+    start, catalog, about, referral, withdraw, select_tariff,
+    process_order, handle_sex, skip_promo, admin_panel, stats,
+    approve_order, home, button_handler, error_handler
 )
 
-# Настройка логирования
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO"))
-)
+# Импортируем функции базы данных
+from database import init_db
+
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def post_init(application: Application):
-    """Функция, которая выполняется после инициализации приложения"""
-    from db import init_db_pool
-    await init_db_pool()
-    logger.info("✅ База данных PostgreSQL инициализирована")
-    print("✅ База данных подключена")
-
-async def post_shutdown(application: Application):
-    """Функция, которая выполняется перед остановкой бота"""
-    from db import close_db_pool
-    await close_db_pool()
-    logger.info("✅ Соединение с базой данных закрыто")
-    print("✅ Соединение с базой данных закрыто")
+async def main_async():
+    """Асинхронный запуск бота"""
+    # Инициализируем базу данных
+    await init_db()
+    logger.info("✅ База данных готова")
+    
+    # Создаем приложение
+    app = Application.builder().token(TOKEN).build()
+    
+    # Регистрируем команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    
+    # Регистрируем callback обработчики
+    app.add_handler(CallbackQueryHandler(button_handler))
+    
+    # Регистрируем обработчики сообщений
+    app.add_handler(MessageHandler(filters.PHOTO, process_order))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_order))
+    
+    # Обработчик ошибок
+    app.add_error_handler(error_handler)
+    
+    logger.info("🚀 Бот запущен")
+    await app.run_polling()
 
 def main():
-    """Запуск бота"""
-    try:
-        # Получаем токен
-        TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TOKEN")
-        if not TOKEN:
-            raise ValueError("❌ Токен бота не знайдено в змінних оточення!")
-        
-        # Создаем приложение
-        app = Application.builder().token(TOKEN).post_init(post_init).post_shutdown(post_shutdown).build()
-        
-        # Добавляем обработчики команд
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", start))
-        app.add_handler(CommandHandler("admin", admin_panel_command))
-        
-        # Добавляем обработчики callback-запросов
-        app.add_handler(CallbackQueryHandler(button_handler))
-        
-        # Добавляем обработчики сообщений
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
-        
-        # Добавляем обработчик ошибок
-        app.add_error_handler(error_handler)
-        
-        logger.info("🌸 Бот FunsDiia готов к запуску!")
-        print("✅ Бот готов к запуску!")
-        print(f"👑 Адмін-панель: /admin")
-        print("🐘 База данных: PostgreSQL Aiven")
-        print("🚀 Запуск бота...")
-        
-        # Запускаем бота (он сам управляет event loop)
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        
-    except Exception as e:
-        logger.error(f"Критична помилка при запуску: {e}")
-        print(f"❌ Критична помилка: {e}")
-        raise
+    """Точка входа"""
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
